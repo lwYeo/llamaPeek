@@ -109,6 +109,14 @@ Current version: **0.1.0**. The version is set once in the project files
 
 ## Build & publish
 
+Prebuilt binaries: grab `llamaPeek.exe` from the
+[Releases](../../releases/latest) page — no SDK needed. Verify with
+`SHA256SUMS.txt` (included with each release):
+
+```powershell
+Get-FileHash .\llamaPeek.exe -Algorithm SHA256
+```
+
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash

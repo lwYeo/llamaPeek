@@ -1,0 +1,39 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+
+      - name: Publish single-file exe
+        run: >
+          dotnet publish src/LlamaPeek.Tray -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:InvariantGlobalization=true
+          -p:SatelliteResourceLanguages=en -p:DebugType=none -p:DebugSymbols=false
+          -o publish
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash publish/llamaPeek.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  llamaPeek.exe" | Out-File -Encoding ascii publish/SHA256SUMS.txt
+          Get-Content publish/SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publish/llamaPeek.exe
+            publish/SHA256SUMS.txt
+          generate_release_notes: true
