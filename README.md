@@ -125,11 +125,14 @@ dotnet test
 
 # single self-contained file — no .NET runtime needed on target
 dotnet publish src/LlamaPeek.Tray -c Release -r win-x64 --self-contained `
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+  -p:EnableCompressionInSingleFile=true -p:InvariantGlobalization=true `
+  -p:SatelliteResourceLanguages=en -p:DebugType=none -p:DebugSymbols=false -o publish
 ```
 
-Result: `publish\llamaPeek.exe` (~116 MB, single file). Copy it anywhere and run; first launch has no servers —
-open Configuration from the tray.
+Result: `publish\llamaPeek.exe` (~47 MB, single file). Copy it anywhere and run; first launch has no servers —
+open Configuration from the tray. The bundle is compressed, so the very first launch takes a few seconds to
+self-extract (cached afterwards).
 
 ## License
 
