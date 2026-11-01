@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LlamaPeek.Core/LlamaPeek.Core.csproj" />
+    <Project Path="src/LlamaPeek.Tray/LlamaPeek.Tray.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LlamaPeek.Tests/LlamaPeek.Tests.csproj" />
+  </Folder>
+</Solution>
