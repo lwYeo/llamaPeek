@@ -23,8 +23,15 @@ public class BackoffTests
     }
 }
 
-public class RegistryTests
+public class RegistryTests : IDisposable
 {
+    public RegistryTests() => RegistryStore.AppKeyPath = @"Software\llamaPeek-test";
+    public void Dispose()
+    {
+        RegistryStore.DeleteAll();
+        RegistryStore.AppKeyPath = @"Software\llamaPeek";
+    }
+
     [Fact]
     public void Settings_RoundTrip()
     {

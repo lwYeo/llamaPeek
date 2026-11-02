@@ -13,7 +13,10 @@ public static class RegistryStore
 {
     public const string RunKeyPath =
         @"Software\Microsoft\Windows\CurrentVersion\Run";
-    public const string AppKeyPath = @"Software\llamaPeek";
+    // Test hook: unit tests point this at HKCU\Software\llamaPeek-test so a
+    // test run can never clobber the user's live configuration. Production
+    // code never changes it.
+    public static string AppKeyPath { get; set; } = @"Software\llamaPeek";
     public const string RunValueName = "llamaPeek";
 
     public static AppSettings Load()

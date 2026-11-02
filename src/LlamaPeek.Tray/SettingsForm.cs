@@ -20,6 +20,13 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _startup = new()
     { Text = "Launch at startup", AutoSize = true, Margin = new Padding(4, 8, 0, 4) };
 
+    private readonly TableLayoutPanel _gridPanel = new()
+    {
+        Dock = DockStyle.Fill,
+        ColumnCount = 1,
+        Margin = new Padding(0),
+    };
+
     public SettingsForm(AppSettings s, string? apiKey)
     {
         Text = "llamaPeek configuration";
@@ -27,13 +34,21 @@ public sealed class SettingsForm : Form
         MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9f);
-        // Fixed dialog at design size — AutoScaleMode.Font scales it to the
-        // runtime DPI exactly once (do NOT pre-multiply by DeviceDpi: that
-        // double-scales and leaves dead space). The percent grid row absorbs
-        // any slack, so no dead space appears under the buttons.
-        ClientSize = new Size(760, 600);
-        AutoScroll = true;   // safety net if a DPI/font combo overflows
-        _apiKey.Text = apiKey ?? "";
+        // DPI scaling: baseline is 96dpi (assigned at the END of the ctor,
+        // after all controls exist), so every size, margin and column below
+        // is multiplied by DeviceDpi/96 exactly once. AutoScaleMode.Font
+        // cannot be used: its baseline is captured at the *current* DPI,
+        // giving factor 1.0 — fonts scaled, layout stayed at design pixels.
+        AutoScaleMode = AutoScaleMode.Dpi;
+        // Design size at 96dpi, sized to content: the 12 AutoSize rows need
+        // ~405px, so 440 leaves a modest grid expansion instead of a huge
+        // percent-row balloon at high DPI.
+        ClientSize = new Size(760, 440);
+        // No AutoScroll: the dialog is FixedDialog and content-sized, and
+        // AutoScroll clips the layout (grid flush to the frame) when the
+        // content minimum width exceeds the client by a few pixels.
+        _existingKey = apiKey ?? "";
+        _apiKey.Text = _existingKey;
 
         BuildGrid(s.Servers);
         _pollActive.Value = s.PollActiveMs;
@@ -51,13 +66,10 @@ public sealed class SettingsForm : Form
             Padding = new Padding(8, 4, 8, 4),
             ColumnCount = 2,
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         // Row styles are indexed by row number — declare every row explicitly.
         for (int i = 0; i < 12; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        // Grid row takes ALL slack (Percent), so any height surplus lands inside
-        // the table, not as dead space under the buttons.
-        root.RowStyles[1] = new RowStyle(SizeType.Percent, 100);
         int row = 0;
 
         var head = Head("Servers:");
@@ -65,19 +77,14 @@ public sealed class SettingsForm : Form
         root.SetColumnSpan(head, 2);
         root.Controls.Add(head, 0, row++);
 
-        // Grid + its buttons share one percent row: the grid's MinimumSize
+        // Grid + its buttons share one row: the grid's MinimumSize
         // shrinks the grid inside this panel, never clipping the buttons.
-        var gridPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            Margin = new Padding(0),
-        };
-        gridPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        gridPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _gridPanel.MinimumSize = new Size(0, _gridRowsHeight + 34);  // grid rows + button strip
+        _gridPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _gridPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _grid.Margin = new Padding(4, 2, 4, 2);
-        gridPanel.Controls.Add(_grid, 0, 0);
+        _gridPanel.Controls.Add(_grid, 0, 0);
 
         var gridButtons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 2, 0, 6) };
         gridButtons.Controls.Add(MakeButton("Add server",
@@ -87,10 +94,10 @@ public sealed class SettingsForm : Form
             if (_grid.CurrentRow is not null && !_grid.CurrentRow.IsNewRow)
                 _grid.Rows.Remove(_grid.CurrentRow);
         }));
-        gridPanel.Controls.Add(gridButtons, 0, 1);
+        _gridPanel.Controls.Add(gridButtons, 0, 1);
 
-        root.SetColumnSpan(gridPanel, 2);
-        root.Controls.Add(gridPanel, 0, row++);
+        root.SetColumnSpan(_gridPanel, 2);
+        root.Controls.Add(_gridPanel, 0, row++);
 
         void AddNumRow(string label, NumericUpDown num)
         {
@@ -135,26 +142,90 @@ public sealed class SettingsForm : Form
         Controls.Add(root);
         CancelButton = cancel;
         AcceptButton = ok;
+
+        // Scale the finished tree once (96dpi baseline), THEN size the form:
+        // PreferredSize is now measured in runtime pixels on the scaled tree,
+        // so no division is needed and nothing can double-scale.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        ClientSize = new Size(
+            (int)Math.Round(640F * DeviceDpi / 96F),   // 640 design px
+            root.PreferredSize.Height);
+    }
+
+    /// <summary>
+    /// Self-correcting width: after the form is shown, the live-DPI layout is
+    /// final (handles created, fonts measured). If the grid's right edge sits
+    /// closer than 16px to the client edge — the Fill columns could not shrink
+    /// enough at this DPI — widen the form so every column, including
+    /// "Required", is fully readable at any Windows scaling (100–250%).
+    /// </summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+
+        float f = DeviceDpi / 96f;
+
+        // The grid (Dock=Fill) kept a stale 1104px width from Fill mode,
+        // overflowing its 936px panel and the form. Un-dock and set explicit
+        // bounds: panel width minus margins.
+        _grid.Dock = DockStyle.None;
+        _grid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _grid.SetBounds(_grid.Left, _grid.Top,
+            _gridPanel.ClientSize.Width - 12, _grid.Height);
+
+        // Columns Fill the grid width (no grey band on the right; Fill can
+        // shrink to MinimumWidth so no clipping). Rows/headers get compact
+        // DPI-scaled heights so cadence matches the numeric rows.
+        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        _grid.RowTemplate.Height = (int)Math.Round(22 * f);
+        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+        _grid.ColumnHeadersHeight = (int)Math.Round(22 * f);
+        foreach (DataGridViewRow r in _grid.Rows) r.Height = _grid.RowTemplate.Height;
+        _gridPanel.PerformLayout();
+
+        // Belt: if the grid's right edge still exceeds the client (e.g. a
+        // font renders wider), widen the form so nothing is clipped.
+        var gridRect = _grid.RectangleToScreen(_grid.ClientRectangle);
+        int need = RectangleToClient(gridRect).Right + 16;
+        if (need > ClientSize.Width)
+            ClientSize = new Size(need, ClientSize.Height);
     }
 
     private void BuildGrid(List<ServerConfig> servers)
     {
         _grid.Dock = DockStyle.Fill;
-        _grid.MinimumSize = new Size(0, 120);   // percent row may shrink, grid may not
         _grid.AllowUserToAddRows = false;
-        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        _grid.RowHeadersVisible = false;                 // no leading selector column
+        _grid.ScrollBars = ScrollBars.Vertical;           // explicit widths: no h-scroll
+        // Explicit DPI-scaled widths (set in OnShown) instead of Fill mode:
+        // Fill's preferred width is unstable and pushed the form past its
+        // design width. Design widths sum to 466px → fits the 640px dialog.
+        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         // Typed value in the Kind combo (e.g. "xyz") raises DataError; the
         // default handler shows a raw exception dialog. Swallow and revert.
         _grid.DataError += (_, e) => e.ThrowException = false;
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name", FillWeight = 12 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "URL", FillWeight = 40 });
+        // Fill mode can only shrink columns to their MinimumWidth (default
+        // 22+, combo columns more). Sum of minima exceeded the grid width at
+        // high DPI, so with no h-scroll the Required column clipped. Low
+        // minima let Fill always fit every column.
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name", FillWeight = 12, MinimumWidth = 40 });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "URL", FillWeight = 45, MinimumWidth = 60 });
         _grid.Columns.Add(new DataGridViewComboBoxColumn
-        { HeaderText = "Kind", FillWeight = 22, Items = { "auto", "llamacpp", "strata" } });
+        { HeaderText = "Kind", FillWeight = 20, MinimumWidth = 50, Items = { "auto", "llamacpp", "strata" } });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn
-        { HeaderText = "Required", FillWeight = 20 });
+        { HeaderText = "Required", FillWeight = 14, MinimumWidth = 40 });
         foreach (var s in servers)
             _grid.Rows.Add(s.Name, s.Url, s.Kind.ToString().ToLowerInvariant(), s.RequiresModel);
+
+        // Height that fits the rows exactly, in DESIGN pixels (the grid's
+        // handle is not created in the ctor, so row/header template heights
+        // are the design 23px; the form's AutoScale pass scales this
+        // MinimumSize by DeviceDpi/96 along with everything else).
+        _gridRowsHeight = 23 + 23 * (_grid.Rows.Count + 1) + 6;
     }
+
+    private int _gridRowsHeight = 120;
+    private readonly string _existingKey;   // key as loaded at dialog open
 
     private static Label Head(string text) =>
         new() { Text = text, AutoSize = true, Margin = new Padding(0, 5, 0, 0) };
@@ -227,6 +298,7 @@ public sealed class SettingsForm : Form
             return;
         }
 
+        // Warn when the bearer token would travel in cleartext.
         // Warn when the bearer token would travel in cleartext.
         var key = _apiKey.Text.Trim();
         if (key.Length > 0 && servers.Any(s => s.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
