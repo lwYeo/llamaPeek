@@ -46,11 +46,16 @@ public class BackoffTests
 
 public class RegistryTests : IDisposable
 {
-    public RegistryTests() => RegistryStore.AppKeyPath = @"Software\llamaPeek-test";
+    public RegistryTests()
+    {
+        RegistryStore.AppKeyPath = @"Software\llamaPeek-test";
+        RegistryStore.RunValueName = "llamaPeek-test";   // sandbox the Run value too
+    }
     public void Dispose()
     {
         RegistryStore.DeleteAll();
         RegistryStore.AppKeyPath = @"Software\llamaPeek";
+        RegistryStore.RunValueName = "llamaPeek";
     }
 
     [Fact]

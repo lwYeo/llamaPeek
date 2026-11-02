@@ -82,11 +82,22 @@ public sealed class IconRenderer : IDisposable
             var evict = _cache.Keys
                 .FirstOrDefault(k => !_live.Contains(_cache[k]));
             if (evict is null) break;
-            _cache[evict].Dispose();
+            // Retire, don't dispose: the icon may be read by UpdateIcon on
+            // this very paint (assigned mid-paint, not yet in _live). The
+            // graveyard drains at the next Render — a full paint later.
+            _graveyard.Add(_cache[evict]);
             _cache.Remove(evict);
+        }
+        // Drain icons retired at least one paint ago.
+        if (_graveyard.Count > 0)
+        {
+            foreach (var dead in _graveyard) dead.Dispose();
+            _graveyard.Clear();
         }
         return icon;
     }
+
+    private readonly List<Icon> _graveyard = [];
 
     private static void DrawCentered(Graphics g, string text, Brush brush)
     {
@@ -122,5 +133,7 @@ public sealed class IconRenderer : IDisposable
     {
         foreach (var icon in _cache.Values) icon.Dispose();
         _cache.Clear();
+        foreach (var icon in _graveyard) icon.Dispose();
+        _graveyard.Clear();
     }
 }

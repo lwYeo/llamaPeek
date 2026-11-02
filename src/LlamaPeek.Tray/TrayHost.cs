@@ -103,11 +103,20 @@ public sealed class TrayHost : ApplicationContext
         if (pp is { } ppv) { _lastPp = ppv; _lastPpAt = now; }
         else if (_lastPp is { } ppl && now - _lastPpAt <= linger) pp = ppl;
 
-        _tg.Icon = _renderer.Render(CapText(tg), Badge(s.TgActive), tgColor, "TG", s.RequiredUnreachable);
-        _pp.Icon = _renderer.Render(CapText(pp), Badge(s.PpActive), ppColor, "PP", s.RequiredUnreachable);
-        _pf.Icon = _renderer.Render(PctText(_lastPct), "%", IconRenderer.Blue, "Prefill", s.RequiredUnreachable);
-        _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
-
+        try
+        {
+            _tg.Icon = _renderer.Render(CapText(tg), Badge(s.TgActive), tgColor, "TG", s.RequiredUnreachable);
+            _pp.Icon = _renderer.Render(CapText(pp), Badge(s.PpActive), ppColor, "PP", s.RequiredUnreachable);
+            _pf.Icon = _renderer.Render(PctText(_lastPct), "%", IconRenderer.Blue, "Prefill", s.RequiredUnreachable);
+            _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
+        }
+        catch (ObjectDisposedException)
+        {
+            // A disposed icon must never reach the crash dialog: the tray is
+            // going away (or an icon raced retirement) — skip this frame.
+            _stopping = true;
+            return;
+        }
         _tg.Text = $"TG {(tg is { } t ? $"{t:N1}" : "--")} t/s — max {(s.TgMax is { } tm ? $"{tm:N1}" : "--")} t/s";
         _pp.Text = $"PP {(pp is { } p ? $"{p:N1}" : "--")} t/s — max {(s.PpMax is { } pm ? $"{pm:N1}" : "--")} t/s";
         _pf.Text = _lastPct is { } pct

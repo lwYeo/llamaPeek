@@ -1,3 +1,18 @@
+# llamaPeek 0.2.1
+
+## Fixed
+
+- **Launch at startup could be silently deleted by test runs** — the
+  registry tests sandboxed the app key but not the launch-at-startup Run
+  value, so running the test suite removed the real autostart entry
+  (the config dialog still showed the box checked). The Run value is now
+  sandboxed in tests; a test run cannot touch it.
+- **Remaining tray-icon crash (`ObjectDisposedException: 'Icon'`)** —
+  evicted cache icons are no longer disposed synchronously (they are
+  retired and disposed one paint later, so nothing is disposed while
+  being assigned/read), and any residual disposed-object race now skips
+  a repaint instead of showing the crash dialog.
+
 # llamaPeek 0.2.0
 
 Changes since 0.1.1.

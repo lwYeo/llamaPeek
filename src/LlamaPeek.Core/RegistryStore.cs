@@ -18,7 +18,10 @@ public static class RegistryStore
     // test run can never clobber the user's live configuration. Production
     // code never changes it.
     public static string AppKeyPath { get; set; } = @"Software\llamaPeek";
-    public const string RunValueName = "llamaPeek";
+    // Test hook: the Run-key value name is sandboxed alongside AppKeyPath —
+    // DeleteAll() removes it, and an unsandboxed name would delete the real
+    // launch-at-startup entry on every test run.
+    public static string RunValueName { get; set; } = "llamaPeek";
 
     public static AppSettings Load()
     {
