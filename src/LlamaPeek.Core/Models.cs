@@ -7,7 +7,10 @@ public sealed record ServerConfig(
     string Name,
     string Url,
     ServerKind Kind = ServerKind.Auto,
-    bool RequiresModel = false);
+    // Router mode: /slots needs ?model=<id>; the loaded model is auto-discovered.
+    bool RequiresModel = false,
+    // Alert: unreachable -> red dot on all icons.
+    bool Required = false);
 
 public sealed class AppSettings
 {
@@ -66,6 +69,6 @@ public sealed class Snapshot
     public double? TgMax;               // running maxima since Restart
     public double? PpMax;
     public bool AnyUnreachable;
-    public bool RequiredUnreachable;    // any RequiresModel server is down -> alert dot
+    public bool RequiredUnreachable;    // any Required server is down -> alert dot
     public DateTime UpdatedUtc;
 }

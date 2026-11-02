@@ -88,7 +88,7 @@ public sealed class SettingsForm : Form
 
         var gridButtons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 2, 0, 6) };
         gridButtons.Controls.Add(MakeButton("Add server",
-            () => _grid.Rows.Add("name", "http://127.0.0.1:8080", "auto", false)));
+            () => _grid.Rows.Add("name", "http://127.0.0.1:8080", "auto", false, false)));
         gridButtons.Controls.Add(MakeButton("Remove selected", () =>
         {
             if (_grid.CurrentRow is not null && !_grid.CurrentRow.IsNewRow)
@@ -209,13 +209,18 @@ public sealed class SettingsForm : Form
         // high DPI, so with no h-scroll the Required column clipped. Low
         // minima let Fill always fit every column.
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name", FillWeight = 12, MinimumWidth = 40 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "URL", FillWeight = 45, MinimumWidth = 60 });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "URL", FillWeight = 38, MinimumWidth = 60 });
         _grid.Columns.Add(new DataGridViewComboBoxColumn
-        { HeaderText = "Kind", FillWeight = 20, MinimumWidth = 50, Items = { "auto", "llamacpp", "strata" } });
+        { HeaderText = "Kind", FillWeight = 18, MinimumWidth = 50, Items = { "auto", "llamacpp", "strata" } });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn
-        { HeaderText = "Required", FillWeight = 14, MinimumWidth = 40 });
+        { HeaderText = "Model", FillWeight = 12, MinimumWidth = 44,
+          ToolTipText = "Router mode: /slots is queried with ?model=<loaded model>." });
+        _grid.Columns.Add(new DataGridViewCheckBoxColumn
+        { HeaderText = "Required", FillWeight = 12, MinimumWidth = 44,
+          ToolTipText = "Unreachable required server lights the red dot on all icons." });
         foreach (var s in servers)
-            _grid.Rows.Add(s.Name, s.Url, s.Kind.ToString().ToLowerInvariant(), s.RequiresModel);
+            _grid.Rows.Add(s.Name, s.Url, s.Kind.ToString().ToLowerInvariant(),
+                s.RequiresModel, s.Required);
 
         // Height that fits the rows exactly, in DESIGN pixels (the grid's
         // handle is not created in the ctor, so row/header template heights
@@ -261,8 +266,18 @@ public sealed class SettingsForm : Form
             }
             var kind = Enum.TryParse<ServerKind>(row.Cells[2].Value?.ToString(), true, out var k)
                 ? k : ServerKind.Auto;
-            var requires = row.Cells[3].Value is true;
-            servers.Add(new ServerConfig(name, url.TrimEnd('/'), kind, requires));
+            var requiresModel = row.Cells[3].Value is true;
+            var required = row.Cells[4].Value is true;
+            servers.Add(new ServerConfig(name, url.TrimEnd('/'), kind, requiresModel, required));
+        }
+
+        // '|' is the aggregator's server/slot key separator: a name containing
+        // it prefix-matches another server's keys and cross-wipes state.
+        if (servers.Any(s => s.Name.Contains('|')))
+        {
+            MessageBox.Show(this, "Server names must not contain the '|' character.",
+                "llamaPeek", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
         }
 
         // Duplicate names collide in the aggregator's "server|slot" state keys
@@ -298,7 +313,6 @@ public sealed class SettingsForm : Form
             return;
         }
 
-        // Warn when the bearer token would travel in cleartext.
         // Warn when the bearer token would travel in cleartext.
         var key = _apiKey.Text.Trim();
         if (key.Length > 0 && servers.Any(s => s.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))

@@ -38,7 +38,7 @@ public sealed class ServerRuntime : IAsyncDisposable
     }
 
     public string Name => _cfg.Name;
-    public bool Required => _cfg.RequiresModel;
+    public bool Required => _cfg.Required;
     public bool Reachable { get; private set; }
     public ServerKind? ResolvedKind { get; private set; }
     public double BackoffMs { get; private set; }
@@ -69,6 +69,7 @@ public sealed class ServerRuntime : IAsyncDisposable
             {
                 Reachable = false;
                 ResolvedKind = null;   // re-ask /health once back
+                _agg.Clear(_cfg.Name); // slots dying mid-task must not linger in snapshots
                 _consecutiveFailures++;
                 double baseMs = Math.Min(10_000, 1000 * Math.Pow(2, Math.Min(_consecutiveFailures, 4)));
                 BackoffMs = baseMs * (0.8 + Random.Shared.NextDouble() * 0.4);
@@ -88,11 +89,8 @@ public sealed class ServerRuntime : IAsyncDisposable
             : LlamaCppSource.Parse(await GetJsonAsync(await SlotsUrlAsync(ct), ct));
 
         var now = DateTime.UtcNow;
-        foreach (var r in readings)
-        {
-            _agg.Feed(_cfg.Name, r, now);
-            if (r.IsProcessing) _lastActiveUtc = now;
-        }
+        _agg.FeedBatch(_cfg.Name, readings, now);
+        if (readings.Any(r => r.IsProcessing)) _lastActiveUtc = now;
     }
 
     private async Task<ServerKind> DetectKindAsync(CancellationToken ct)

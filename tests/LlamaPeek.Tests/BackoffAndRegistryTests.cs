@@ -21,6 +21,27 @@ public class BackoffTests
         Assert.Null(snap.PpRate);
         Assert.Null(snap.TgRate);
     }
+
+    [Fact]
+    public async Task RequiredDown_Alerts_RequiresModelDown_DoesNot()
+    {
+        // The split: Required drives the alert dot; RequiresModel (router
+        // ?model= mode) must not.
+        var settings = new AppSettings
+        {
+            Servers =
+            [
+                new ServerConfig("router", "http://127.0.0.1:1", RequiresModel: true),
+                new ServerConfig("critical", "http://127.0.0.1:2", Required: true),
+            ],
+            PollActiveMs = 100, PollIdleMs = 100, RefreshMs = 100,
+        };
+        await using var m = new StatsMonitor(settings, () => null);
+        m.Start();
+
+        var snap = await TestUtil.AwaitAsync(m, s => s.RequiredUnreachable, timeoutMs: 5_000);
+        Assert.True(snap.RequiredUnreachable);   // 'critical' is Required
+    }
 }
 
 public class RegistryTests : IDisposable
@@ -63,5 +84,26 @@ public class RegistryTests : IDisposable
         Assert.Equal("sk-test-12345", RegistryStore.LoadApiKey());
         RegistryStore.SaveApiKey(null);
         Assert.Null(RegistryStore.LoadApiKey());
+    }
+
+    [Fact]
+    public void LegacySchema_RequiresModel_MigratesToRequired_Once()
+    {
+        // Pre-0.2 config: RequiresModel overloaded as "Required", no marker.
+        using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RegistryStore.AppKeyPath))
+            k.SetValue("Servers",
+                """[{"Name":"a","Url":"http://127.0.0.1:1","Kind":0,"RequiresModel":true}]""");
+
+        var loaded = RegistryStore.Load();
+        Assert.True(loaded.Servers[0].Required);        // alert meaning preserved
+        Assert.False(loaded.Servers[0].RequiresModel);  // router mode off
+
+        // Persist, then verify the split survives reload (marker set: no
+        // re-migration — an explicit router-mode config stays as saved).
+        loaded.Servers[0] = loaded.Servers[0] with { RequiresModel = true };
+        RegistryStore.Save(loaded);
+        var again = RegistryStore.Load();
+        Assert.True(again.Servers[0].RequiresModel);    // stays router mode
+        Assert.True(again.Servers[0].Required);         // stays alert
     }
 }

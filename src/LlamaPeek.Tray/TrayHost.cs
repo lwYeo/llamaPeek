@@ -50,13 +50,13 @@ public sealed class TrayHost : ApplicationContext
             try { _hidden.BeginInvoke(() => Paint(snap)); }
             catch { /* form disposed mid-flight — exiting */ }
         };
-        _monitor.Start();
 
         _hidden.FormClosed += (_, _) =>
         {
             // Icons vanish immediately (no ghost slots), UI thread never waits
             // on an in-flight HTTP poll: cancellation is requested and the
             // loops finish as the process exits.
+            _stopping = true;
             _tg.Visible = _pp.Visible = _pf.Visible = false;
             _tg.Dispose(); _pp.Dispose(); _pf.Dispose();
             foreach (var m in _menus) m.Dispose(); _renderer.Dispose();
@@ -64,10 +64,23 @@ public sealed class TrayHost : ApplicationContext
                 _ => ExitThread(), TaskScheduler.Default);
         };
         _hidden.Show();
+        // Start after Show: BeginInvoke on a not-yet-created handle throws,
+        // and the first snapshot's paint would be silently dropped.
+        _monitor.Start();
     }
+
+    private bool _stopping;
 
     private void Paint(Snapshot s)
     {
+        // A snapshot marshaled just before exit can run after FormClosed
+        // disposed the icons — skip it (ObjectDisposedException on Icon).
+        if (_stopping) return;
+
+        // Protect currently-displayed icons from cache eviction during the
+        // Render calls below, then the freshly assigned set.
+        _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
+
         // Idle faces are the phase color greyed out (50% blend), not red;
         // unreachability stays visible in the tooltips.
         var tgColor = s.TgActive > 0 ? IconRenderer.Green : Blend(IconRenderer.Green, IconRenderer.Gray);
@@ -93,6 +106,7 @@ public sealed class TrayHost : ApplicationContext
         _tg.Icon = _renderer.Render(CapText(tg), Badge(s.TgActive), tgColor, "TG", s.RequiredUnreachable);
         _pp.Icon = _renderer.Render(CapText(pp), Badge(s.PpActive), ppColor, "PP", s.RequiredUnreachable);
         _pf.Icon = _renderer.Render(PctText(_lastPct), "%", IconRenderer.Blue, "Prefill", s.RequiredUnreachable);
+        _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
 
         _tg.Text = $"TG {(tg is { } t ? $"{t:N1}" : "--")} t/s — max {(s.TgMax is { } tm ? $"{tm:N1}" : "--")} t/s";
         _pp.Text = $"PP {(pp is { } p ? $"{p:N1}" : "--")} t/s — max {(s.PpMax is { } pm ? $"{pm:N1}" : "--")} t/s";
@@ -130,14 +144,27 @@ public sealed class TrayHost : ApplicationContext
 
     private SettingsForm? _configForm;
 
+    private bool _aboutOpen;
+
     private void OnAbout(object? _, EventArgs __) =>
-        _hidden.BeginInvoke(() => MessageBox.Show(   // no owner: _hidden is minimized, owner-centering would corner it
-            $"llamaPeek {Program.Version}\n\n" +
-            "Tray monitor for llama.cpp-compatible inference servers.\n" +
-            "Author: lwYeo — https://github.com/lwYeo/llamaPeek\n\n" +
-            "Reads counters only (health, metrics, slots, models); prompts and\n" +
-            "completions are never read, logged, or stored. MIT licensed.",
-            "About llamaPeek", MessageBoxButtons.OK, MessageBoxIcon.Information));
+        _hidden.BeginInvoke(() =>
+        {
+            // Modal box runs on the UI thread; queued clicks must not stack
+            // a new box per click — one About at a time.
+            if (_aboutOpen) return;
+            _aboutOpen = true;
+            try
+            {
+                MessageBox.Show(   // no owner: _hidden is minimized, owner-centering would corner it
+                    $"llamaPeek {Program.Version}\n\n" +
+                    "Tray monitor for llama.cpp-compatible inference servers.\n" +
+                    "Author: lwYeo — https://github.com/lwYeo/llamaPeek\n\n" +
+                    "Reads counters only (health, metrics, slots, models); prompts and\n" +
+                    "completions are never read, logged, or stored. MIT licensed.",
+                    "About llamaPeek", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            finally { _aboutOpen = false; }
+        });
 
     private void OnConfig(object? _, EventArgs __)
     {
@@ -176,6 +203,11 @@ public sealed class TrayHost : ApplicationContext
 
     private void Restart()
     {
+        // Linger state belongs to the old aggregator — drop it so the icons
+        // don't show the previous session's values for one tick.
+        _lastPct = _lastTg = _lastPp = null;
+        _lastProc = _lastTot = null;
+
         // Serialize: two overlapping RestartAsync calls would interleave
         // stop/build/start and spawn duplicate poll loops.
         _restartChain = _restartChain

@@ -1,3 +1,4 @@
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -34,6 +35,23 @@ public static class RegistryStore
             }
             catch (JsonException) { /* corrupt value -> defaults */ }
         }
+        // One-time schema migration: pre-0.2 configs overloaded RequiresModel
+        // with "required alert". Split: the flag users meant becomes Required;
+        // router mode is opt-in again. The SchemaV2 marker is written right
+        // here so an explicit Model tick is never re-migrated, even if the
+        // user never presses OK.
+        if (key.GetValue("SchemaV2") as int? != 1)
+        {
+            for (int i = 0; i < s.Servers.Count; i++)
+                if (s.Servers[i].RequiresModel)
+                    s.Servers[i] = s.Servers[i] with { RequiresModel = false, Required = true };
+            try
+            {
+                using var w = Registry.CurrentUser.OpenSubKey(AppKeyPath, writable: true);
+                w?.SetValue("SchemaV2", 1, RegistryValueKind.DWord);
+            }
+            catch (SecurityException) { /* read-only registry: migration stays in-memory */ }
+        }
         s.PollActiveMs = Math.Clamp(GetInt(key, "PollActiveMs", s.PollActiveMs), 100, 60_000);
         s.PollIdleMs = Math.Clamp(GetInt(key, "PollIdleMs", s.PollIdleMs), 100, 600_000);
         s.GraceMs = Math.Clamp(GetInt(key, "GraceMs", s.GraceMs), 0, 600_000);
@@ -61,6 +79,7 @@ public static class RegistryStore
         key.SetValue("Smoothing",
             s.Smoothing.ToString(System.Globalization.CultureInfo.InvariantCulture));
         key.SetValue("LaunchAtStartup", s.LaunchAtStartup ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue("SchemaV2", 1, RegistryValueKind.DWord);
     }
 
     public static string? LoadApiKey()

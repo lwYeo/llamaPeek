@@ -19,6 +19,18 @@ public sealed class IconRenderer : IDisposable
     private const int CacheCap = 300;
     private readonly Dictionary<string, Icon> _cache = new();
 
+    // Icons currently assigned to the NotifyIcons. Evicting one of these
+    // disposes the live tray icon and the next UpdateIcon throws
+    // ObjectDisposedException — they are skipped.
+    private readonly HashSet<Icon> _live = new();
+    public void SetLive(Icon? a, Icon? b, Icon? c)
+    {
+        _live.Clear();
+        if (a is not null) _live.Add(a);
+        if (b is not null) _live.Add(b);
+        if (c is not null) _live.Add(c);
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
@@ -32,8 +44,9 @@ public sealed class IconRenderer : IDisposable
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            using (var face = Rounded(new Rectangle(1, 1, Size - 3, Size - 3), 12))
-                g.FillPath(new SolidBrush(bg), face);
+            using var face = Rounded(new Rectangle(1, 1, Size - 3, Size - 3), 12);
+            using (var faceBrush = new SolidBrush(bg))
+                g.FillPath(faceBrush, face);
             DrawCentered(g, text, Brushes.White);
             if (label is not null)
             {
@@ -64,12 +77,13 @@ public sealed class IconRenderer : IDisposable
         _cache[key] = icon;
         while (_cache.Count > CacheCap)
         {
-            foreach (var oldest in _cache.Keys)
-            {
-                _cache[oldest].Dispose();
-                _cache.Remove(oldest);
-                break;
-            }
+            // Evict the oldest non-live entry; if everything is live,
+            // allow the cache to sit briefly over the cap.
+            var evict = _cache.Keys
+                .FirstOrDefault(k => !_live.Contains(_cache[k]));
+            if (evict is null) break;
+            _cache[evict].Dispose();
+            _cache.Remove(evict);
         }
         return icon;
     }

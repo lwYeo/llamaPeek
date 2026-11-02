@@ -36,7 +36,7 @@ public sealed class Aggregator(double smoothing)
 
     public void Feed(string server, SlotReading r, DateTime nowUtc)
     {
-        var key = $"{server}|{(r.IsTopLevel ? "top" : r.SlotId)}";
+        var key = Key(server, r);
         var st = _states.GetOrAdd(key, _ => { var s = new SlotState(); s.Init(smoothing); return s; });
         lock (st)
         {
@@ -54,10 +54,41 @@ public sealed class Aggregator(double smoothing)
         }
     }
 
+    /// <summary>Feed a whole poll result for one server, then drop state for
+    /// slots that vanished from the response. A slot that dies mid-task keeps
+    /// its last phase and rate, and Read() would sum that phantom forever.</summary>
+    public void FeedBatch(string server, IReadOnlyList<SlotReading> readings, DateTime nowUtc)
+    {
+        foreach (var r in readings) Feed(server, r, nowUtc);
+        var live = readings.Select(r => Key(server, r)).ToHashSet();
+        foreach (var key in _states.Keys.ToList())
+            if (key.StartsWith(server + "|", StringComparison.Ordinal) && !live.Contains(key))
+                _states.TryRemove(key, out _);
+    }
+
+    /// <summary>Drop all state for a server (poll failed / server down): its
+    /// slots' last rates and phases must not keep contributing to snapshots.</summary>
+    public void Clear(string server)
+    {
+        foreach (var key in _states.Keys.ToList())
+            if (key.StartsWith(server + "|", StringComparison.Ordinal))
+                _states.TryRemove(key, out _);
+    }
+
+    private static string Key(string server, SlotReading r) =>
+        $"{server}|{(r.IsTopLevel ? "top" : r.SlotId)}";
+
     private static void FeedLlamaCpp(SlotState st, SlotReading r, DateTime nowUtc)
     {
         long proc = r.PromptProcessed ?? 0;
         long decoded = r.Decoded ?? 0;
+
+        // Counter regression = server restarted (counters zeroed). Without a
+        // task id to key off, the old high-water baselines would freeze PP/TG
+        // until the new counters climbed past the old values.
+        if (proc < st.PrevProcessed || decoded < st.PrevDecoded)
+            st.ResetTask();
+
         bool ppMoved = proc > st.PrevProcessed;
         bool tgMoved = decoded > st.PrevDecoded;
 

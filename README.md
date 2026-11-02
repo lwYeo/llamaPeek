@@ -22,11 +22,13 @@ From left: **TG** (decode, tokens/s, badge = active slots) · **PP** (prefill, t
 - Shows **combined** decode rate (TG), prefill rate (PP), and prefill progress (Prefill %) on three tray icons.
 - Badge on TG/PP = number of slots actively decoding/prefilling across all servers.
 - Red dot (top-right) on all icons when a server marked **Required** stops answering.
+- A failed poll clears that server's rate baselines: after recovery, PP/TG rates re-warm from zero
+  (a slot that dies mid-task can never linger in the icons; expect a brief ramp-up after timeouts).
 - Running maxima (best TG/PP seen) in the hover tooltip; reset by Restart.
 - Auto-detects server type via `/health` (`"service": "strata"` → Strata, else llama.cpp).
 - Handles llama.cpp quirks: rates are measured across counter *changes* (not poll intervals, so `--batch-size`
   jumps don't overstate), chunked-prefill totals are detected and the % suppressed per task, router builds
-  that need `?model=` get the loaded model auto-discovered.
+  that need `?model=` get the loaded model auto-discovered (per-server **Model** checkbox).
 - API key sent as `Bearer` header; stored only as a DPAPI (current-user) encrypted blob in the registry.
 - Launch at startup (HKCU Run key), single instance via mutex, no installer, no admin rights.
 
@@ -75,7 +77,7 @@ ServerRuntime (per server)          Aggregator                     TrayHost
 
 | Field | Default | Range | What it affects |
 |---|---|---|---|
-| **Servers** | empty | — | Name, URL, Kind (`auto`/`llamacpp`/`strata`), **Required** (required servers light the red disconnect dot; names must be unique). |
+| **Servers** | empty | — | Name, URL, Kind (`auto`/`llamacpp`/`strata`), **Model** (router builds: `/slots` is queried with `?model=<loaded model>`, auto-discovered via `/v1/models`), **Required** (a required server that stops answering lights the red dot; names must be unique). |
 | **Poll active (ms)** | 500 | 100–60 000 | Poll interval while a server shows recent activity. |
 | **Poll idle (ms)** | 2000 | 100–60 000 | Poll interval while a server is idle. |
 | **Grace (ms)** | 2500 | 0–60 000 | How long recent activity keeps the active cadence. Must be ≥ Linger (enforced). |
@@ -102,7 +104,7 @@ llamaPeek is designed for on-prem inference endpoints and reads **counters only*
 
 ## Versioning
 
-Current version: **0.1.0**. The version is set once in the project files
+Current version: **0.2.0**. The version is set once in the project files
 (`<Version>` in `LlamaPeek.Core.csproj` / `LlamaPeek.Tray.csproj`) and surfaces via
 `llamaPeek.exe --version` (also visible on the exe's file properties). Releases are tagged
 `v<major>.<minor>.<patch>`.
@@ -121,7 +123,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
 # check the version of a published build
-./publish/llamaPeek.exe --version    # -> llamaPeek 0.1.0
+./publish/llamaPeek.exe --version    # -> llamaPeek 0.2.0
 ```
 
 ```bash
