@@ -4,7 +4,11 @@ using System.Drawing.Drawing2D;
 namespace LlamaPeek.Tray;
 
 /// <summary>Renders "72" / "2k" / "53%" faces with an optional active-count badge
-/// at bottom-right. Icons are cached by rendered content; HICON handles destroyed.</summary>
+/// at bottom-right. Icons are cached by rendered content. The cache is bounded;
+/// evicted icons are dropped, never disposed — a tray icon may still be reading
+/// one, and the Icon finalizer frees the GDI handle once nothing references it.
+/// (Explicit disposal of cached icons caused ObjectDisposedException crashes
+/// and a permanent paint freeze; lifetime belongs to the GC.)</summary>
 public sealed class IconRenderer : IDisposable
 {
     public static readonly Color Green = Color.FromArgb(0x0d, 0x5c, 0x33);
@@ -18,18 +22,6 @@ public sealed class IconRenderer : IDisposable
     // over days of running. Dictionary insertion order = eviction order.
     private const int CacheCap = 300;
     private readonly Dictionary<string, Icon> _cache = new();
-
-    // Icons currently assigned to the NotifyIcons. Evicting one of these
-    // disposes the live tray icon and the next UpdateIcon throws
-    // ObjectDisposedException — they are skipped.
-    private readonly HashSet<Icon> _live = new();
-    public void SetLive(Icon? a, Icon? b, Icon? c)
-    {
-        _live.Clear();
-        if (a is not null) _live.Add(a);
-        if (b is not null) _live.Add(b);
-        if (c is not null) _live.Add(c);
-    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
@@ -77,27 +69,14 @@ public sealed class IconRenderer : IDisposable
         _cache[key] = icon;
         while (_cache.Count > CacheCap)
         {
-            // Evict the oldest non-live entry; if everything is live,
-            // allow the cache to sit briefly over the cap.
-            var evict = _cache.Keys
-                .FirstOrDefault(k => !_live.Contains(_cache[k]));
-            if (evict is null) break;
-            // Retire, don't dispose: the icon may be read by UpdateIcon on
-            // this very paint (assigned mid-paint, not yet in _live). The
-            // graveyard drains at the next Render — a full paint later.
-            _graveyard.Add(_cache[evict]);
-            _cache.Remove(evict);
-        }
-        // Drain icons retired at least one paint ago.
-        if (_graveyard.Count > 0)
-        {
-            foreach (var dead in _graveyard) dead.Dispose();
-            _graveyard.Clear();
+            // Drop the oldest entry (insertion order). No disposal: a tray
+            // icon may be mid-UpdateIcon on it; the finalizer reclaims the
+            // GDI handle once the last reference goes.
+            var oldest = _cache.Keys.First();
+            _cache.Remove(oldest);
         }
         return icon;
     }
-
-    private readonly List<Icon> _graveyard = [];
 
     private static void DrawCentered(Graphics g, string text, Brush brush)
     {
@@ -131,9 +110,8 @@ public sealed class IconRenderer : IDisposable
 
     public void Dispose()
     {
-        foreach (var icon in _cache.Values) icon.Dispose();
+        // No disposal of cached icons: NotifyIcons may still reference them.
+        // Process exit releases every GDI handle.
         _cache.Clear();
-        foreach (var icon in _graveyard) icon.Dispose();
-        _graveyard.Clear();
     }
 }

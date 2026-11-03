@@ -77,57 +77,36 @@ public sealed class TrayHost : ApplicationContext
         // disposed the icons — skip it (ObjectDisposedException on Icon).
         if (_stopping) return;
 
-        // Protect currently-displayed icons from cache eviction during the
-        // Render calls below, then the freshly assigned set.
-        _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
-
         // Idle faces are the phase color greyed out (50% blend), not red;
         // unreachability stays visible in the tooltips.
         var tgColor = s.TgActive > 0 ? IconRenderer.Green : Blend(IconRenderer.Green, IconRenderer.Gray);
         var ppColor = s.PpActive > 0 ? IconRenderer.Amber : Blend(IconRenderer.Amber, IconRenderer.Gray);
 
-        // Prefill retains its last value on idle — stays blue, never greys out.
-        if (s.PrefillPct is { } live)
-        {
-            _lastPct = live;
-            _lastProc = s.PrefillProcessed;
-            _lastTot = s.PrefillTotal;
-        }
-
-        // PP/TG values linger LingerMs past idle so the handover is readable.
-        var now = DateTime.UtcNow;
-        var linger = TimeSpan.FromMilliseconds(_settings.LingerMs);
-        var tg = s.TgRate; var pp = s.PpRate;
-        if (tg is { } tgv) { _lastTg = tgv; _lastTgAt = now; }
-        else if (_lastTg is { } tgl && now - _lastTgAt <= linger) tg = tgl;
-        if (pp is { } ppv) { _lastPp = ppv; _lastPpAt = now; }
-        else if (_lastPp is { } ppl && now - _lastPpAt <= linger) pp = ppl;
+        // Prefill retains its last value on idle (stays blue); PP/TG values
+        // linger LingerMs past idle so the handover is readable.
+        var (tg, pp) = _linger.Apply(s, TimeSpan.FromMilliseconds(_settings.LingerMs), DateTime.UtcNow);
 
         try
         {
             _tg.Icon = _renderer.Render(CapText(tg), Badge(s.TgActive), tgColor, "TG", s.RequiredUnreachable);
             _pp.Icon = _renderer.Render(CapText(pp), Badge(s.PpActive), ppColor, "PP", s.RequiredUnreachable);
-            _pf.Icon = _renderer.Render(PctText(_lastPct), "%", IconRenderer.Blue, "Prefill", s.RequiredUnreachable);
-            _renderer.SetLive(_tg.Icon, _pp.Icon, _pf.Icon);
+            _pf.Icon = _renderer.Render(PctText(_linger.Pct), "%", IconRenderer.Blue, "Prefill", s.RequiredUnreachable);
         }
         catch (ObjectDisposedException)
         {
-            // A disposed icon must never reach the crash dialog: the tray is
-            // going away (or an icon raced retirement) — skip this frame.
-            _stopping = true;
+            // A disposed icon must never reach the crash dialog. Skip THIS
+            // frame only — do not touch _stopping (that would freeze the
+            // icons permanently; it belongs to FormClosed alone).
             return;
         }
         _tg.Text = $"TG {(tg is { } t ? $"{t:N1}" : "--")} t/s — max {(s.TgMax is { } tm ? $"{tm:N1}" : "--")} t/s";
         _pp.Text = $"PP {(pp is { } p ? $"{p:N1}" : "--")} t/s — max {(s.PpMax is { } pm ? $"{pm:N1}" : "--")} t/s";
-        _pf.Text = _lastPct is { } pct
-            ? $"Prefill {pct:F0}% — {_lastProc:N0}/{_lastTot:N0} tok"
+        _pf.Text = _linger.Pct is { } pct
+            ? $"Prefill {pct:F0}% — {_linger.Processed:N0}/{_linger.Total:N0} tok"
             : "Prefill —";
     }
 
-    private double? _lastPct;
-    private long? _lastProc, _lastTot;
-    private double? _lastTg, _lastPp;
-    private DateTime _lastTgAt, _lastPpAt;
+    private readonly LingerState _linger = new();
 
     private static Color Blend(Color a, Color b) =>
         Color.FromArgb((a.R + b.R) / 2, (a.G + b.G) / 2, (a.B + b.B) / 2);
@@ -208,28 +187,33 @@ public sealed class TrayHost : ApplicationContext
 
     private void OnRestart(object? _, EventArgs __) => Restart();
 
-    private Task _restartChain = Task.CompletedTask;
+    private readonly SemaphoreSlim _restartGate = new(1, 1);
 
     private void Restart()
     {
         // Linger state belongs to the old aggregator — drop it so the icons
         // don't show the previous session's values for one tick.
-        _lastPct = _lastTg = _lastPp = null;
-        _lastProc = _lastTot = null;
+        _linger.Reset();
 
-        // Serialize: two overlapping RestartAsync calls would interleave
-        // stop/build/start and spawn duplicate poll loops.
-        _restartChain = _restartChain
-            .ContinueWith(_ =>
+        // Serialize: two overlapping restarts would interleave stop/build/
+        // start and spawn duplicate poll loops. The gate holds the order;
+        // failures are observed (never unobserved Task exceptions).
+        _ = Task.Run(async () =>
+        {
+            await _restartGate.WaitAsync();
+            try
             {
                 _settings = RegistryStore.Load();
-                return _monitor.RestartAsync(_settings);
-            })
-            .ContinueWith(t =>
-            {
+                await _monitor.RestartAsync(_settings);
                 try { _hidden.BeginInvoke(() => Paint(_monitor.Current())); }
                 catch { /* form disposed mid-flight — exiting */ }
-            });
+            }
+            catch
+            {
+                /* restart failed: icons keep the last snapshot; user can retry */
+            }
+            finally { _restartGate.Release(); }
+        });
     }
 
     private void OnExit(object? _, EventArgs __) =>

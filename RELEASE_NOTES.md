@@ -1,3 +1,23 @@
+# llamaPeek 0.2.2
+
+## Fixed
+
+- **Frozen tray icons (0.2.1 regression)** — the disposed-icon guard added
+  in 0.2.1 latched the shutdown flag on a single transient race, which
+  stopped all repainting permanently. The guard now skips only the current
+  frame; the icons keep updating.
+
+## Changed
+
+- **Icon lifetime simplified** — cached tray icons are no longer disposed
+  at runtime (evicted icons are dropped and reclaimed by the GC finalizer).
+  Nothing can be disposed while a tray icon is reading it, which removes
+  the `ObjectDisposedException` crash class at its source.
+- Internal refactors with no behavior change: the PP/TG linger window and
+  prefill retention moved into a tested `LingerState` class, and the
+  restart sequence uses a serialized async gate instead of a continuation
+  chain.
+
 # llamaPeek 0.2.1
 
 ## Fixed
