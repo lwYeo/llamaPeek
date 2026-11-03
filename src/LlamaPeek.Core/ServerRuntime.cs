@@ -64,9 +64,13 @@ public sealed class ServerRuntime : IAsyncDisposable
                          DateTime.UtcNow - _lastActiveUtc <= TimeSpan.FromMilliseconds(_settings.GraceMs);
                 delayMs = active ? _settings.PollActiveMs : _settings.PollIdleMs;
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch
             {
+                // Includes HttpClient timeouts (TaskCanceledException is an
+                // OperationCanceledException): a network outage must back off
+                // and RETRY, not kill the loop — that latched the red dot on
+                // every icon after a brief Tailscale drop.
                 Reachable = false;
                 ResolvedKind = null;   // re-ask /health once back
                 _agg.Clear(_cfg.Name); // slots dying mid-task must not linger in snapshots

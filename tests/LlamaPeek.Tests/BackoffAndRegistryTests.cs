@@ -23,6 +23,41 @@ public class BackoffTests
     }
 
     [Fact]
+    public async Task ClientTimeout_OutageRecovers_NotLoopDeath()
+    {
+        // Simulate a network outage: requests hang past the client's 4s
+        // timeout (TaskCanceledException). The poll loop must back off and
+        // recover when the network returns — not treat the timeout as
+        // shutdown and die (that latched the red dot forever).
+        var start = DateTime.UtcNow;
+        var outage = TimeSpan.FromSeconds(6);
+        string Responder(string path)
+        {
+            if (path == "/health") return """{"status":"ok"}""";
+            if (DateTime.UtcNow - start < outage)
+                System.Threading.Thread.Sleep((int)outage.TotalMilliseconds + 500); // blackhole
+            return """[{"id":0,"is_processing":true,"id_task":1,"n_ctx":8192,"n_prompt_tokens":16384,"n_prompt_tokens_processed":2048,"n_prompt_tokens_cache":0,"next_token":[{"id":0,"content":"x","n_decoded":0}]}]""";
+        }
+        await using var stub = await StubServer.StartAsync(Responder);
+        var settings = new AppSettings
+        {
+            Servers = [new ServerConfig("stub", stub.Url, Required: true)],
+            PollActiveMs = 100, PollIdleMs = 200, RefreshMs = 100,
+        };
+        await using var m = new StatsMonitor(settings, () => null);
+        m.Start();
+
+        // Outage: marked unreachable.
+        var down = await TestUtil.AwaitAsync(m, s => s.AnyUnreachable, timeoutMs: 10_000);
+        Assert.True(down.AnyUnreachable);
+
+        // Network back: polling resumes and data flows again.
+        var up = await TestUtil.AwaitAsync(m, s => !s.AnyUnreachable && s.PpActive > 0, timeoutMs: 15_000);
+        Assert.False(up.AnyUnreachable);
+        Assert.True(up.PpActive > 0);
+    }
+
+    [Fact]
     public async Task RequiredDown_Alerts_RequiresModelDown_DoesNot()
     {
         // The split: Required drives the alert dot; RequiresModel (router

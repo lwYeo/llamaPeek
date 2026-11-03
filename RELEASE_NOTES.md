@@ -1,3 +1,14 @@
+# llamaPeek 0.2.3
+
+## Fixed
+
+- **Red dot latched forever after a brief network outage** — an HTTP
+  request timeout (e.g. a Tailscale drop blackholing the connection) was
+  treated as app shutdown and permanently killed the server's poll loop,
+  so the icons showed "unreachable" on every icon even after the network
+  recovered and the engine was serving fine. Timeouts now back off and
+  retry like any other failure; monitoring recovers automatically.
+
 # llamaPeek 0.2.2
 
 ## Fixed
