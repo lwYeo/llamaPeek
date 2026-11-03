@@ -6,8 +6,7 @@ A Windows tray monitor for [llama.cpp](https://github.com/ggml-org/llama.cpp)-co
 (llama.cpp, and Strata). Three tiny tray icons give you at-a-glance inference throughput — no window, no web UI,
 no logs to tail.
 
-Built with .NET 10 (WinForms, single-file self-contained publish). Concept ported from the
-`oc-llama-overlay` PowerShell widget into a native tray application.
+Built with .NET 10 (WinForms, single-file self-contained publish) as a native tray application.
 
 ![tray icons](tray-icons.png)
 
