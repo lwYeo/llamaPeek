@@ -103,7 +103,7 @@ llamaPeek is designed for on-prem inference endpoints and reads **counters only*
 
 ## Versioning
 
-Current version: **0.2.3**. The version is set once in the project files
+Current version: **0.2.4**. The version is set once in the project files
 (`<Version>` in `LlamaPeek.Core.csproj` / `LlamaPeek.Tray.csproj`) and surfaces via
 `llamaPeek.exe --version` (also visible on the exe's file properties). Releases are tagged
 `v<major>.<minor>.<patch>`.
@@ -122,7 +122,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
 # check the version of a published build
-./publish/llamaPeek.exe --version    # -> llamaPeek 0.2.3
+./publish/llamaPeek.exe --version    # -> llamaPeek 0.2.4
 ```
 
 ```bash

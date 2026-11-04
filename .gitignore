@@ -4,3 +4,9 @@ obj/
 publish/
 *.user
 .vs/
+
+# local-only (never published)
+PLAN.md
+ref/
+tools/
+oc-llama-overlay.zip

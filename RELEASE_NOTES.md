@@ -1,3 +1,25 @@
+# llamaPeek 0.2.4
+
+## Fixed
+
+- **Strata batch slots keyed by the wrong field** — the server's
+  `slots_view()` emits each slot as `"slot": N`; the parser read `"id"`,
+  so slot identity worked only by enumeration-order coincidence. It now
+  reads `"slot"`, matching `serve/server.py` exactly.
+
+## Changed
+
+- **Strata contract documented from live payloads** — the per-slot
+  `prompt_total` / `prefill_tok_s_mean` reads were removed (the server
+  never emits them, so per-slot % and server-rate are not available),
+  and the source now records that prompt progress arrives only at PP
+  boundaries (~every 1024 tokens): prompts shorter than the first
+  boundary, and fully prompt-cache-reused reads, report no progress at
+  all — the prefill % correctly stays blank instead of showing 0%.
+- New parser tests pin the exact `/metrics` shapes captured live from a
+  running Strata server (top-level reading, short-prompt no-progress,
+  batch slot table).
+
 # llamaPeek 0.2.3
 
 ## Fixed

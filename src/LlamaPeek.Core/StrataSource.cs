@@ -6,9 +6,13 @@ namespace LlamaPeek.Core;
 /// Parses strata GET /metrics -> live. Two shapes (verified 0.1.39-0.1.55):
 /// a request running alone sits OUTSIDE the slot table (top-level fields only);
 /// batched requests get per-slot entries with state/prompt_tokens/generated.
-/// prompt_read is an ABSOLUTE position (reused prefix counts toward it), reported
-/// once per 8192-token chunk. prefill_tok_s_mean is STALE until the request's
-/// first chunk. Slot tok_s is generated/elapsed_s and lies for batched slots,
+/// prompt_read is an ABSOLUTE position (reused prefix counts toward it); the
+/// engine emits PP progress lines ~every 1024 tokens, so prompts shorter than
+/// the first boundary (and fully prompt-cache-reused reads) report NO progress
+/// at all — % stays blank, which is the server's limitation, not a parse miss.
+/// prefill_tok_s_mean is STALE until the request's first chunk. Slots carry no
+/// prompt_total/prefill_tok_s_mean, so per-slot % and server-rate are not
+/// available. Slot tok_s is generated/elapsed_s and lies for batched slots,
 /// so TG is measured from generated deltas, never from tok_s.
 /// </summary>
 public static class StrataSource
@@ -43,14 +47,12 @@ public static class StrataSource
             var st = StateOf(slot);
             readings.Add(new SlotReading
             {
-                SlotId = (int)(GetLong(slot, "id") ?? readings.Count),
+                SlotId = (int)(GetLong(slot, "slot") ?? readings.Count),
                 State = st,
                 IsProcessing = st != Phase.Idle,
                 PromptTotal = GetLong(slot, "prompt_tokens"),
                 Generated = GetLong(slot, "generated"),
                 PromptRead = GetLong(slot, "prompt_read"),
-                PromptTotalAbs = GetLong(slot, "prompt_total"),
-                ServerPrefillRate = GetDouble(slot, "prefill_tok_s_mean"),
             });
         }
 
