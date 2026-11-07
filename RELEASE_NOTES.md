@@ -1,3 +1,27 @@
+# llamaPeek 0.2.5
+
+## Fixed
+
+- **Prefill % frozen at 99% after a Strata batch-mode restart** — two
+  bugs surfaced when the engine ran with `--parallel`/batch enabled:
+  - A lone request runs on the server's *solo path*: `/metrics` reports
+    its progress only in the top-level fields while `slots[]` stays
+    all-idle (`outside_slots`). The parser ignored top-level whenever
+    `slots[]` was non-empty, so a single running request looked idle
+    and the icons never updated. Top-level is now used whenever no
+    slot is busy.
+  - Strata readings carry no task id, so when a new prompt restarted
+    the absolute counters, the previous task's high-water baseline
+    survived: `prompt_read` (starting low) never beat it, the prefill
+    % stuck at the 99% cap with impossible numbers
+    (`129,422/102,577 tok`), and PP baselines froze. A counter
+    regression (`read` or `generated` below the stored baseline) is now
+    treated as a new task and resets the baselines — the same
+    protection the llama.cpp path already had.
+- New tests pin the batch shapes captured live from a running Strata
+  server (solo request with idle slots, busy-slot ownership, and the
+  new-task counter regression).
+
 # llamaPeek 0.2.4
 
 ## Fixed

@@ -6,6 +6,9 @@ namespace LlamaPeek.Core;
 /// Parses strata GET /metrics -> live. Two shapes (verified 0.1.39-0.1.55):
 /// a request running alone sits OUTSIDE the slot table (top-level fields only);
 /// batched requests get per-slot entries with state/prompt_tokens/generated.
+/// With batch enabled, a SOLO request still uses the top-level fields while
+/// slots[] stays all-idle (server.py "outside_slots") — top-level is used
+/// whenever no slot is busy.
 /// prompt_read is an ABSOLUTE position (reused prefix counts toward it); the
 /// engine emits PP progress lines ~every 1024 tokens, so prompts shorter than
 /// the first boundary (and fully prompt-cache-reused reads) report NO progress
@@ -56,9 +59,14 @@ public static class StrataSource
             });
         }
 
-        // Top-level request only exists when nothing is batched; once slots[] has
-        // entries it owns the state (top-level fields mix requests when two overlap).
-        if (slots.Count == 0)
+        // Top-level fields own the state when nothing is batched, or when the
+        // batch slots are all idle: with batch enabled a lone request runs on
+        // the SOLO path — slots[] reports every slot idle while the real
+        // progress is in the top-level fields (server.py "outside_slots").
+        // Once a slot is busy it owns the state (top-level fields mix
+        // requests when two overlap).
+        bool slotBusy = readings.Any(r => r.State != Phase.Idle);
+        if (slots.Count == 0 || (topState != Phase.Idle && !slotBusy))
             readings.Add(top);
 
         return readings;

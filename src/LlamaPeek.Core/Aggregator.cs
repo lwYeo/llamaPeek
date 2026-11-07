@@ -128,6 +128,17 @@ public sealed class Aggregator(double smoothing)
             st.Phase = Phase.Idle;
             return;
         }
+
+        // A new task restarts the absolute counters; strata readings carry no
+        // task id to key off, so a regression (read/gen below the old
+        // baseline) is the only signal. Without this reset the previous
+        // task's high-water froze the prefill % at the 99% cap
+        // (processed > total) and the PP baseline until the new task's
+        // counters climbed past it.
+        if ((r.PromptRead is { } pr && pr < st.PrevRead) ||
+            (r.Generated is { } pg && pg < st.PrevDecoded))
+            st.ResetTask();
+
         st.Phase = state;
 
         long read = r.PromptRead ?? 0;

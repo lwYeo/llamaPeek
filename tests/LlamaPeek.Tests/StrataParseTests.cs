@@ -68,4 +68,69 @@ public class StrataParseTests
         Assert.Equal(Phase.Decode, r[2].State);
         Assert.Equal(45, r[2].Generated);
     }
+
+    [Fact]
+    public void BatchEnabled_SoloRequest_TopLevelCarriesProgress_WhenSlotsAllIdle()
+    {
+        // Live shape with engine batch enabled and ONE request running: it sits
+        // on the solo path — slots[] reports every slot idle while the real
+        // progress is in the top-level fields (server.py "outside_slots").
+        var r = StrataSource.Parse("""
+        {"live":{"state":"reading","queued":0,"parallel":2,"outside_slots":1,
+          "prompt_read":10240,"prompt_total":105474,"prompt_tokens":105474,
+          "generated":0,"prefill_tok_s_mean":1697.4,
+          "slots":[{"slot":0,"state":"idle","held_tokens":0},
+                   {"slot":1,"state":"idle","held_tokens":0}]}}
+        """);
+        var top = Assert.Single(r, x => x.IsTopLevel);
+        Assert.Equal(Phase.Prefill, top.State);
+        Assert.Equal(10240, top.PromptRead);
+        Assert.Equal(105474, top.PromptTotalAbs);
+    }
+
+    [Fact]
+    public void BatchEnabled_SlotBusy_SlotsOwnState_TopLevelSuppressed()
+    {
+        // Once a slot is busy it owns the state: top-level fields mix requests
+        // when two overlap and must not be added.
+        var r = StrataSource.Parse("""
+        {"live":{"state":"generating","queued":0,"parallel":2,"outside_slots":0,
+          "prompt_read":null,"prompt_total":null,"prompt_tokens":5000,
+          "generated":120,"prefill_tok_s_mean":null,
+          "slots":[{"slot":0,"state":"decoding","prompt_tokens":5000,
+                    "prompt_read":null,"generated":120,"elapsed_s":4.0,"tok_s":30.0}]}}
+        """);
+        Assert.All(r, x => Assert.False(x.IsTopLevel));
+        Assert.Single(r);
+        Assert.Equal(Phase.Decode, r[0].State);
+    }
+
+    [Fact]
+    public void Strata_NewTask_CounterRegression_RestartsBaselines_NotStuckAt99()
+    {
+        // Strata readings carry no task id: when a new prompt restarts the
+        // absolute counters, the old high-water must not survive — it pinned
+        // processed > total and froze the % at the 99% cap.
+        var agg = new Aggregator(0.0);
+        var t0 = DateTime.UtcNow;
+
+        void Feed(Phase state, long read, long total, long gen) =>
+            agg.FeedBatch("s", [new SlotReading
+            {
+                SlotId = 0, IsTopLevel = true, State = state, IsProcessing = true,
+                PromptRead = read, PromptTotalAbs = total, Generated = gen,
+            }], t0);
+
+        Feed(Phase.Prefill, 100_000, 105_000, 0);
+        Assert.InRange(agg.Read().PrefillPct ?? 0.0, 94.0, 96.0); // task 1 ~95%
+        Feed(Phase.Decode, 105_000, 105_000, 500);
+
+        // New task: counters restart low. % must reflect the NEW task.
+        Feed(Phase.Prefill, 1_000, 30_000, 0);
+        var snap = agg.Read();
+        Assert.NotNull(snap.PrefillPct);
+        Assert.InRange(snap.PrefillPct!.Value, 1.0, 5.0);
+        Assert.Equal(1_000, snap.PrefillProcessed);
+        Assert.Equal(30_000, snap.PrefillTotal);
+    }
 }
