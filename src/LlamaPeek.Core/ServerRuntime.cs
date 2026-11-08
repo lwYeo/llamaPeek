@@ -136,17 +136,25 @@ public sealed class ServerRuntime : IAsyncDisposable
 
     private async Task<string> GetJsonAsync(string url, CancellationToken ct)
     {
+        // HttpClient.Timeout only covers up to the response headers
+        // (ResponseHeadersRead): a server that sends headers then stalls the
+        // body (engine restart, mid-transfer network drop) hung the poll loop
+        // forever — no failure, no backoff, icons frozen until the socket died
+        // or the user hit Restart. One deadline over the WHOLE exchange.
+        using var overall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        overall.CancelAfter(TimeSpan.FromSeconds(4));
+
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         var key = _apiKey();
         if (!string.IsNullOrEmpty(key))
             req.Headers.Authorization = new("Bearer", key);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, overall.Token);
         resp.EnsureSuccessStatusCode();
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        await using var stream = await resp.Content.ReadAsStreamAsync(overall.Token);
         using var ms = new MemoryStream();
         var buf = new byte[16 * 1024];
         int total = 0, n;
-        while ((n = await stream.ReadAsync(buf, ct)) > 0)
+        while ((n = await stream.ReadAsync(buf, overall.Token)) > 0)
         {
             total += n;
             if (total > MaxResponseBytes)

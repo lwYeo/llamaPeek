@@ -1,3 +1,21 @@
+# llamaPeek 0.2.6
+
+## Fixed
+
+- **Icons and tooltips froze intermittently, with no unreachable dot** —
+  `HttpClient.Timeout` only covers up to the response **headers**
+  (`ResponseHeadersRead`); the body-read loop had no timeout at all. A
+  server that answered and then stalled the body — what happens while the
+  engine restarts, or on a mid-transfer network drop — hung that server's
+  poll loop indefinitely: no failure recorded, no backoff, no red dot,
+  icons frozen. It recovered only once the socket died on its own, or
+  immediately via the Restart menu item (which tears the loop down).
+  A single overall timeout now bounds the whole exchange, so a stalled
+  response flows into the existing failure/backoff path and monitoring
+  recovers by itself. Reproduced as a regression test (first poll OK,
+  second stalls the body): the loop now times out, marks the server
+  unreachable, and keeps polling through backoff.
+
 # llamaPeek 0.2.5
 
 ## Fixed
